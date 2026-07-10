@@ -51,11 +51,11 @@ Backend Node.js / Express
 PostgreSQL Database
 
 ## Technology Stack
-# Application
+## Application
 Frontend: React, Vite, Nginx
 Backend: Node.js, Express
 Database: PostgreSQL
-# DevOps
+## DevOps
 Docker
 Docker Compose
 Kubernetes
@@ -63,7 +63,7 @@ Azure Kubernetes Service
 Terraform
 GitHub Actions
 GitHub Container Registry
-# Security Tools
+## Security Tools
 ESLint
 npm audit
 Hadolint
@@ -109,7 +109,7 @@ jerney-devsecops/
 └── README.md
 
 ## Local Deployment with Docker Compose
-# Prerequisites
+## Prerequisites
 
 The following tools must be installed:
 
@@ -120,10 +120,10 @@ Docker Compose
 Run the application locally
 docker compose up --build -d
 
-# Check running containers:
+## Check running containers:
 
 docker compose ps
 
-# Access the application:
+## Access the application:
 
 http://localhost
