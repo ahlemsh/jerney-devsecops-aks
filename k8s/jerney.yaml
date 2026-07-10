@@ -189,7 +189,7 @@ spec:
                 - ALL
       containers:
         - name: backend
-          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-backend:15f78c1
+          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-backend:26b4856
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
@@ -301,7 +301,7 @@ spec:
         fsGroup: 101
       containers:
         - name: frontend
-          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-frontend:15f78c1
+          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-frontend:26b4856
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
