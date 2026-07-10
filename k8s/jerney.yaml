@@ -1,9 +1,9 @@
 # ==============================================================
-# Jerney Blog Platform - Kubernetes Manifest (Single File)
-# Includes: Namespace, Secrets, PVC (EBS), DB, Backend, Frontend
+# Jerney Blog Platform - Kubernetes Manifest for Azure AKS
+# Includes: Namespace, Secret, PVC, PostgreSQL, Backend, Frontend,
+# Services and NetworkPolicies
 # ==============================================================
 
-# ---- Namespace ----
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -12,13 +12,6 @@ metadata:
     app.kubernetes.io/part-of: jerney
 
 ---
-# ---- Database Secret ----
-# In production, use External Secrets Operator or Sealed Secrets.
-# This is base64 encoded for demo purposes.
-# echo -n 'jerney_user' | base64 → amVybmV5X3VzZXI=
-# echo -n 'jerney_pass_2026' | base64 → amVybmV5X3Bhc3NfMjAyNg==
-# echo -n 'jerney_db' | base64 → amVybmV5X2Ri
-
 apiVersion: v1
 kind: Secret
 metadata:
@@ -27,27 +20,12 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jerney
 type: Opaque
-data:
-  POSTGRES_USER: amVybmV5X3VzZXI=
-  POSTGRES_PASSWORD: amVybmV5X3Bhc3NfMjAyNg==
-  POSTGRES_DB: amVybmV5X2Ri
+stringData:
+  POSTGRES_USER: jerney_user
+  POSTGRES_PASSWORD: jerney_pass_2026
+  POSTGRES_DB: jerney_db
 
 ---
-# ---- EBS StorageClass (gp3) ----
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: jerney-ebs-sc
-provisioner: ebs.csi.eks.amazonaws.com
-parameters:
-  type: gp3
-  encrypted: "true"
-reclaimPolicy: Retain
-volumeBindingMode: WaitForFirstConsumer
-allowVolumeExpansion: true
-
----
-# ---- PersistentVolumeClaim for PostgreSQL (EBS) ----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -59,13 +37,12 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: jerney-ebs-sc
+  storageClassName: managed-csi
   resources:
     requests:
       storage: 10Gi
 
 ---
-# ---- PostgreSQL Deployment ----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,7 +55,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate # Required for RWO volumes
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: jerney-db
@@ -89,15 +66,11 @@ spec:
         app.kubernetes.io/part-of: jerney
         app.kubernetes.io/component: database
     spec:
-      # Security: don't automount service account token (DB doesn't need K8s API)
       automountServiceAccountToken: false
-      tolerations:
-        - key: "karpenter.sh/disrupted"
-          operator: "Exists"
-          effect: "NoSchedule"
       containers:
         - name: postgres
           image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5432
               protocol: TCP
@@ -110,26 +83,34 @@ spec:
               subPath: pgdata
           resources:
             requests:
-              cpu: 250m
+              cpu: 150m
               memory: 256Mi
             limits:
               cpu: 500m
               memory: 512Mi
-          # Security context
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false # Postgres needs write access
-            runAsNonRoot: false            # Postgres image runs initdb as root then drops
+            readOnlyRootFilesystem: false
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "jerney_user", "-d", "jerney_db"]
-            initialDelaySeconds: 15
+              command:
+                - pg_isready
+                - -U
+                - jerney_user
+                - -d
+                - jerney_db
+            initialDelaySeconds: 20
             periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "jerney_user", "-d", "jerney_db"]
-            initialDelaySeconds: 5
+              command:
+                - pg_isready
+                - -U
+                - jerney_user
+                - -d
+                - jerney_db
+            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
       volumes:
@@ -138,7 +119,6 @@ spec:
             claimName: jerney-db-pvc
 
 ---
-# ---- PostgreSQL Service (ClusterIP — internal only) ----
 apiVersion: v1
 kind: Service
 metadata:
@@ -153,12 +133,12 @@ spec:
   selector:
     app.kubernetes.io/name: jerney-db
   ports:
-    - port: 5432
+    - name: postgres
+      port: 5432
       targetPort: 5432
       protocol: TCP
 
 ---
-# ---- Backend Deployment ----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -169,7 +149,7 @@ metadata:
     app.kubernetes.io/part-of: jerney
     app.kubernetes.io/component: backend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: jerney-backend
@@ -181,13 +161,14 @@ spec:
         app.kubernetes.io/component: backend
     spec:
       automountServiceAccountToken: false
-      tolerations:
-        - key: "karpenter.sh/disrupted"
-          operator: "Exists"
-          effect: "NoSchedule"
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 1000
       initContainers:
         - name: wait-for-db
           image: busybox:1.36
+          imagePullPolicy: IfNotPresent
           command:
             - sh
             - -c
@@ -198,9 +179,18 @@ spec:
                 sleep 3
               done
               echo "DB is ready!"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
       containers:
         - name: backend
-          image: ghcr.io/iam-veeramalla/Jerney/jerney-backend:75da1da
+          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-backend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
               protocol: TCP
@@ -208,7 +198,7 @@ spec:
             - name: PORT
               value: "5000"
             - name: DB_HOST
-              value: "jerney-db"
+              value: jerney-db
             - name: DB_PORT
               value: "5432"
             - name: DB_USER
@@ -233,7 +223,9 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
-          # Security context
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -246,19 +238,21 @@ spec:
             httpGet:
               path: /api/health
               port: 5000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /api/health
               port: 5000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
 
 ---
-# ---- Backend Service (ClusterIP — internal only) ----
 apiVersion: v1
 kind: Service
 metadata:
@@ -273,12 +267,12 @@ spec:
   selector:
     app.kubernetes.io/name: jerney-backend
   ports:
-    - port: 5000
+    - name: http
+      port: 5000
       targetPort: 5000
       protocol: TCP
 
 ---
-# ---- Frontend Deployment ----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -289,7 +283,7 @@ metadata:
     app.kubernetes.io/part-of: jerney
     app.kubernetes.io/component: frontend
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: jerney-frontend
@@ -301,13 +295,14 @@ spec:
         app.kubernetes.io/component: frontend
     spec:
       automountServiceAccountToken: false
-      tolerations:
-        - key: "karpenter.sh/disrupted"
-          operator: "Exists"
-          effect: "NoSchedule"
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 101
       containers:
         - name: frontend
-          image: ghcr.io/iam-veeramalla/Jerney/jerney-frontend:75da1da
+          image: ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -318,11 +313,18 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false # Nginx needs write for cache/pid
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
-            runAsUser: 101 # nginx user UID in alpine
+            runAsUser: 101
             capabilities:
               drop:
                 - ALL
@@ -330,20 +332,25 @@ spec:
             httpGet:
               path: /
               port: 8080
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /
               port: 8080
-            initialDelaySeconds: 3
+            initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 
 ---
-# ---- Frontend Service (NodePort — for access via port-forward or node IP) ----
-# NOTE: Changed from LoadBalancer because this AWS account does not support
-# creating load balancers. Use `kubectl port-forward svc/jerney-frontend 8080:80 -n jerney`
-# to access the frontend locally.
 apiVersion: v1
 kind: Service
 metadata:
@@ -354,16 +361,16 @@ metadata:
     app.kubernetes.io/part-of: jerney
     app.kubernetes.io/component: frontend
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: jerney-frontend
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 8080
       protocol: TCP
 
 ---
-# ---- NetworkPolicy: DB only accepts traffic from Backend ----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -385,7 +392,6 @@ spec:
           protocol: TCP
 
 ---
-# ---- NetworkPolicy: Backend accepts traffic from Frontend only ----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -405,4 +411,3 @@ spec:
       ports:
         - port: 5000
           protocol: TCP
-          
