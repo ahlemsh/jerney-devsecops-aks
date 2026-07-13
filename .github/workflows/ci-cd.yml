@@ -3,7 +3,7 @@
 # ==============================================================
 # Triggers on every push and pull request.
 # Target: Azure AKS + GitHub Container Registry GHCR
-# Stages: Lint → SCA → Build → Image Scan → IaC Scan → Deploy Manifest Update
+# Stages: Lint → Secrets Scan → SCA → Dockerfile Lint → IaC Scan → SAST → Build/Image Scan/Push → DAST → Deploy Manifest Update
 # ==============================================================
 
 name: Jerney DevSecOps Pipeline
@@ -17,6 +17,8 @@ on:
     branches:
       - main
       - azure-aks
+    paths-ignore:
+      - "README.md"
 
 permissions:
   contents: read
@@ -54,7 +56,26 @@ jobs:
         run: npm run lint
 
   # ==============================================================
-  # STAGE 2: Software Composition Analysis - npm audit
+  # STAGE 2: Secrets Scanning - Gitleaks
+  # ==============================================================
+  secrets-scan:
+    name: "Secrets Scan"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # scan full git history, not just the latest commit
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==============================================================
+  # STAGE 3: Software Composition Analysis - npm audit
   # ==============================================================
   sca:
     name: "Dependency Audit ${{ matrix.component }}"
@@ -86,7 +107,7 @@ jobs:
         run: npm audit --audit-level=high
 
   # ==============================================================
-  # STAGE 3: Dockerfile Lint - Hadolint
+  # STAGE 4: Dockerfile Lint - Hadolint
   # ==============================================================
   dockerfile-lint:
     name: "Dockerfile Lint ${{ matrix.component }}"
@@ -108,7 +129,7 @@ jobs:
           failure-threshold: warning
 
   # ==============================================================
-  # STAGE 4: IaC Security Scan - Checkov
+  # STAGE 5: IaC Security Scan - Checkov
   # ==============================================================
   iac-scan:
     name: "IaC Security Scan"
@@ -137,15 +158,38 @@ jobs:
           output_format: cli
 
   # ==============================================================
-  # STAGE 5: Build, Scan and Push Docker Images to GHCR
+  # STAGE 6: SAST - SonarCloud
+  # ==============================================================
+  sast-sonarcloud:
+    name: "SAST - SonarCloud"
+    runs-on: ubuntu-latest
+    needs: lint
+    continue-on-error: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required for accurate SonarCloud analysis (blame/history)
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ==============================================================
+  # STAGE 7: Build, Scan and Push Docker Images to GHCR
   # ==============================================================
   build-scan-push:
     name: "Build, Scan and Push ${{ matrix.component }}"
     runs-on: ubuntu-latest
     needs:
+      - secrets-scan
       - sca
       - dockerfile-lint
       - iac-scan
+      - sast-sonarcloud
 
     permissions:
       contents: read
@@ -209,13 +253,52 @@ jobs:
           docker push ${{ steps.vars.outputs.image_name }}:latest
 
   # ==============================================================
-  # STAGE 6: Update Kubernetes Manifest with New Image Tag
+  # STAGE 8: DAST - OWASP ZAP Baseline Scan
   # ==============================================================
+  dast-zap:
+    name: "DAST - OWASP ZAP"
+    runs-on: ubuntu-latest
+    needs: build-scan-push
+    continue-on-error: true
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start application stack
+        run: docker compose up -d --build
+
+      - name: Wait for application to be ready
+        shell: bash
+        run: |
+          for i in {1..15}; do
+            if curl -sf http://localhost > /dev/null; then
+              echo "Application is up."
+              break
+            fi
+            echo "Waiting for app... ($i/15)"
+            sleep 5
+          done
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "http://localhost"
+          fail_action: false
+
+      - name: Stop application stack
+        if: always()
+        run: docker compose down
+
+  # ==============================================================
+  # STAGE 9: Update Kubernetes Manifest with New Image Tag
+  # ==============================================================
   update-manifest:
     name: "Update Kubernetes Manifest"
     runs-on: ubuntu-latest
-    needs: build-scan-push
+    needs:
+      - build-scan-push
+      - dast-zap
 
     if: github.event_name == 'push'
 
@@ -235,8 +318,8 @@ jobs:
           OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           IMAGE_TAG=$(git rev-parse --short HEAD)
 
-          BACKEND_IMAGE="ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-backend"
-          FRONTEND_IMAGE="ghcr.io/ahlemsh/jerney-devsecops-azure/jerney-frontend"
+          BACKEND_IMAGE="ghcr.io/${OWNER}/jerney-backend"
+          FRONTEND_IMAGE="ghcr.io/${OWNER}/jerney-frontend"
 
           echo "Backend image: ${BACKEND_IMAGE}:${IMAGE_TAG}"
           echo "Frontend image: ${FRONTEND_IMAGE}:${IMAGE_TAG}"
