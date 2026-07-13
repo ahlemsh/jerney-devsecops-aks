@@ -189,7 +189,7 @@ spec:
                 - ALL
       containers:
         - name: backend
-          image: ghcr.io/ahlemsh/jerney-backend:7a98f91
+          image: ghcr.io/ahlemsh/jerney-backend:8ab8db3
           imagePullPolicy: Always
           ports:
             - containerPort: 5000
@@ -301,7 +301,7 @@ spec:
         fsGroup: 101
       containers:
         - name: frontend
-          image: ghcr.io/ahlemsh/jerney-frontend:7a98f91
+          image: ghcr.io/ahlemsh/jerney-frontend:8ab8db3
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
