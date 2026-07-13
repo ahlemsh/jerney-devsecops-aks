@@ -288,11 +288,16 @@ jobs:
           docker compose logs
           exit 1
 
+      - name: Prepare ZAP report directory
+        run: |
+          mkdir -p zap-reports
+          chmod 777 zap-reports
+
       - name: Run OWASP ZAP Baseline Scan
         shell: bash
         run: |
           docker run --network host \
-            -v "${{ github.workspace }}:/zap/wrk/:rw" \
+            -v "${{ github.workspace }}/zap-reports:/zap/wrk/:rw" \
             zaproxy/zap-stable \
             zap-baseline.py \
             -t http://localhost \
@@ -307,9 +312,9 @@ jobs:
         with:
           name: owasp-zap-report
           path: |
-            zap-report.html
-            zap-report.json
-            zap-report.md
+            zap-reports/zap-report.html
+            zap-reports/zap-report.json
+            zap-reports/zap-report.md
 
       - name: Stop application stack
         if: always()
