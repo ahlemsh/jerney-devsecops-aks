@@ -285,10 +285,12 @@ jobs:
         with:
           target: "http://localhost"
           fail_action: false
+          allow_issue_writing: false
 
       - name: Stop application stack
         if: always()
         run: docker compose down
+        
 
   # ==============================================================
   # STAGE 9: Update Kubernetes Manifest with New Image Tag
