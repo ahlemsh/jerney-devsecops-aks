@@ -8,6 +8,7 @@ RUN npm run build
 
 # ---- Production stage ----
 FROM nginx:1.27-alpine AS production
+RUN apk add --no-cache --upgrade libcrypto3=3.3.7-r0 libssl3=3.3.7-r0
 
 # Security: remove default nginx config
 RUN rm -rf /etc/nginx/conf.d/default.conf /usr/share/nginx/html/*
