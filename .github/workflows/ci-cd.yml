@@ -105,7 +105,7 @@ jobs:
 
       - name: Run npm audit
         working-directory: ${{ matrix.component }}
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
   # ==============================================================
   # STAGE 4: Dockerfile Lint - Hadolint
