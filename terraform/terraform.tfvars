@@ -1,4 +1,4 @@
-location            = "westeurope"
+location            = "francecentral"
 resource_group_name = "rg-jerney-devsecops"
 project_name        = "jerney-devsecops"
 
@@ -6,7 +6,7 @@ aks_cluster_name = "aks-jerney"
 dns_prefix       = "jerney"
 
 node_count   = 1
-node_vm_size = "Standard_D2s_v3"
+node_vm_size = "Standard_D2as_v7"
 
 vnet_cidr       = "10.20.0.0/16"
 aks_subnet_cidr = "10.20.1.0/24"
