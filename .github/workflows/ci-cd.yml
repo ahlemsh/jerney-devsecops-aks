@@ -411,7 +411,7 @@ jobs:
 
     steps:
       - name: Checkout latest branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           ref: azure-aks
           fetch-depth: 0

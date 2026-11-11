@@ -20,9 +20,16 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jerney
 type: Opaque
+# Values must be provided at deploy time via:
+#   kubectl create secret generic jerney-db-secret \
+#     --from-literal=POSTGRES_USER=<user> \
+#     --from-literal=POSTGRES_PASSWORD=<password> \
+#     --from-literal=POSTGRES_DB=<dbname> \
+#     -n jerney
+# Or via a secrets manager (e.g. Azure Key Vault + External Secrets Operator)
 stringData:
   POSTGRES_USER: jerney_user
-  POSTGRES_PASSWORD: jerney_pass_2026
+  POSTGRES_PASSWORD: CHANGE_ME
   POSTGRES_DB: jerney_db
 
 ---
