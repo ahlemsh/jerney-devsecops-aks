@@ -1,6 +1,5 @@
 # Jerney — DevSecOps Platform on Azure AKS
 
-![CI/CD](https://github.com/ahlemsh/jerney-devsecops-aks/actions/workflows/ci-cd.yml/badge.svg)
 
 Jerney is a full-stack blog platform built as a personal DevSecOps project. The goal was to design and ship a complete, production-grade delivery chain: from local development with Docker Compose, to infrastructure provisioning with Terraform, to a hardened Kubernetes deployment on Azure AKS — with security controls integrated at every stage of the CI/CD pipeline.
 
